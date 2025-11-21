@@ -34,7 +34,8 @@ public class AnalisadorLexico {
     }
 
     public AnalisadorLexico(String codigoFonte) {
-        this.codigoFonte = codigoFonte + "\n"; // Garante que o último caractere seja tratado
+        // Adiciona '\n' ou espaço final para garantir que o último token seja tratado
+        this.codigoFonte = codigoFonte + (codigoFonte.endsWith("\n") ? "" : "\n");
     }
 
     public List<Token> analisar() {
@@ -46,9 +47,7 @@ public class AnalisadorLexico {
                 tokens.add(token);
             }
             if (token.getTipo() == TipoToken.ERRO) {
-                // Em um compilador real, o erro seria reportado e a análise continuaria
-                System.err.println("Erro Léxico: " + token.getLexema());
-                // Por simplicidade, interrompemos aqui.
+                System.err.println("Erro Léxico: " + token.getLexema() + " na Linha " + token.getLinha() + ", Coluna " + token.getColuna());
                 break;
             }
         } while (token.getTipo() != TipoToken.EOF);
@@ -61,11 +60,12 @@ public class AnalisadorLexico {
     // --- Lógica do Autômato Léxico (AFD) ---
 
     private Token proximoToken() {
-        // 1. Ignorar espaços em branco e comentários
+        // 1. Ignorar espaços em branco, quebras de linha E COMENTÁRIOS.
         ignorarEspacosEQuebras();
 
         // Se chegamos ao fim do arquivo
         if (ponteiro >= codigoFonte.length()) {
+            // Ajusta a linha/coluna para a posição após o último token (ou final real)
             return new Token(TipoToken.EOF, "Fim", linha, coluna);
         }
 
@@ -78,7 +78,7 @@ public class AnalisadorLexico {
         }
 
         // 3. Reconhecer Números (dígito+ ou .dígito+)
-        if (Character.isDigit(caractereAtual) || caractereAtual == '.') {
+        if (Character.isDigit(caractereAtual) || (caractereAtual == '.' && proximoCaractereEDigito())) {
             return reconhecerNumero(colunaInicio);
         }
 
@@ -86,9 +86,16 @@ public class AnalisadorLexico {
         return reconhecerSimbolos(caractereAtual, colunaInicio);
     }
 
+    // Auxiliar para a função reconhecerNumero, para evitar tokenização incorreta de '.'
+    private boolean proximoCaractereEDigito() {
+        return ponteiro + 1 < codigoFonte.length() && Character.isDigit(codigoFonte.charAt(ponteiro + 1));
+    }
+
+
     private void ignorarEspacosEQuebras() {
         while (ponteiro < codigoFonte.length()) {
             char c = codigoFonte.charAt(ponteiro);
+
             if (c == ' ' || c == '\t' || c == '\r') {
                 ponteiro++;
                 coluna++;
@@ -96,20 +103,43 @@ public class AnalisadorLexico {
                 ponteiro++;
                 linha++;
                 coluna = 1; // Reinicia a coluna na nova linha
+            } else if (c == '/') {
+                // Checa se é o início de um comentário de linha '//'
+                if (ponteiro + 1 < codigoFonte.length() && codigoFonte.charAt(ponteiro + 1) == '/') {
+                    // É um comentário. Consome até o final da linha ou EOF.
+                    ponteiro += 2; // Consome o '//'
+                    coluna += 2;
+
+                    while (ponteiro < codigoFonte.length()) {
+                        char proximoC = codigoFonte.charAt(ponteiro);
+                        if (proximoC == '\n') {
+                            // Encontrou o final do comentário (que é o '\n'), consome-o
+                            ponteiro++;
+                            linha++;
+                            coluna = 1;
+                            break; // Sai do loop interno e volta para ignorarEspacosEQuebras
+                        }
+                        ponteiro++;
+                        coluna++;
+                    }
+                    // Continua o loop ignorarEspacosEQuebras para checar por mais espaços/comentários
+                } else {
+                    // Não é um comentário, é o operador DIVISAO. Para e deixa para reconhecerSimbolos.
+                    break;
+                }
             } else {
-                break; // Caractere significativo encontrado
+                break; // Caractere significativo (não espaço/quebra/comentário) encontrado
             }
         }
     }
 
     private Token reconhecerIdentificadorOuReservada(int colunaInicio) {
         StringBuilder sb = new StringBuilder();
-        // A gramática do identificador é: letra | letra (letra | digito)* [cite: 18]
 
         while (ponteiro < codigoFonte.length() &&
                 (Character.isLetterOrDigit(codigoFonte.charAt(ponteiro)))) {
 
-            if (sb.length() < 10) { // Premissa: Identificador máx. 10 símbolos [cite: 27]
+            if (sb.length() < 10) {
                 sb.append(codigoFonte.charAt(ponteiro));
                 ponteiro++;
                 coluna++;
@@ -131,8 +161,6 @@ public class AnalisadorLexico {
         StringBuilder sb = new StringBuilder();
         boolean hasDecimal = false;
 
-        // Gramática do Número: digito+ | .digito+ | digito+.digito+ [cite: 24]
-
         // Se começou com '.', já marca como decimal
         if (codigoFonte.charAt(ponteiro) == '.') {
             sb.append(codigoFonte.charAt(ponteiro));
@@ -140,8 +168,9 @@ public class AnalisadorLexico {
             coluna++;
             hasDecimal = true;
 
-            // É obrigatório ter dígitos após o ponto, segundo a gramática
+            // Já checado em proximoToken() que há dígitos após o ponto, mas para robustez
             if (ponteiro >= codigoFonte.length() || !Character.isDigit(codigoFonte.charAt(ponteiro))) {
+                // Este caso deve ser evitado se proximoToken estiver correto, mas é um bom fallback
                 return new Token(TipoToken.ERRO, "Número mal formado (ponto sem dígitos)", linha, colunaInicio);
             }
         }
@@ -166,6 +195,11 @@ public class AnalisadorLexico {
                 ponteiro++;
                 coluna++;
             }
+        }
+
+        // Verifica se é um ponto solto, se o lexema for apenas ".", é ERRO.
+        if (sb.toString().equals(".")) {
+            return new Token(TipoToken.ERRO, "Ponto solto não reconhecido.", linha, colunaInicio);
         }
 
         return new Token(TipoToken.NUMERICO, sb.toString(), linha, colunaInicio);
@@ -197,6 +231,9 @@ public class AnalisadorLexico {
             case '*':
                 return new Token(TipoToken.MULTIPLICACAO, "*", linha, colunaInicio);
             case '/':
+                // CORREÇÃO: Já tratamos '//' em ignorarEspacosEQuebras(). Aqui, é apenas DIVISAO.
+                // Se o Analisador Lexico não tivesse ignorado o '//', ele cairia aqui duas vezes.
+                // Com o ajuste em ignorarEspacosEQuebras(), este caso só deve ser o operador de DIVISAO.
                 return new Token(TipoToken.DIVISAO, "/", linha, colunaInicio);
 
             case '=':
@@ -231,13 +268,12 @@ public class AnalisadorLexico {
                     return new Token(TipoToken.DIFERENTE, "!=", linha, colunaInicio);
                 }
                 // Se não for '!=', é um símbolo não reconhecido
-                // Retorna o ponteiro para tratar como caractere único não identificado
                 ponteiro--;
                 coluna--;
                 return new Token(TipoToken.ERRO, String.valueOf(caractereAtual), linha, colunaInicio);
 
             default:
-                // Caractere não reconhecido (Erro Léxico - COD. 01) [cite: 57]
+                // Caractere não reconhecido
                 return new Token(TipoToken.ERRO, String.valueOf(caractereAtual), linha, colunaInicio);
         }
     }

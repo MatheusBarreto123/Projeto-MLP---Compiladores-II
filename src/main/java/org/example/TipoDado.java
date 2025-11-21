@@ -4,5 +4,6 @@ public enum TipoDado {
    INTEIRO,
    REAL,
    CARACTER,
-   INDETERMINADO
+   INDETERMINADO,
+    BOOLEANO
 }

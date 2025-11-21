@@ -1,0 +1,10 @@
+$
+inteiro a, b, c;
+real d;
+caracter ch; // Variável declarada, mas não usada em cálculo (SEM_03)
+
+a = 5 + 3 * 2; // (a = 11) - Testa precedência e múltiplos temporários
+b = a / 2;     // (b = 5)  - Testa Divisão
+
+se (NOT (b < a)) entao c = b + 0; // Testa operador NOT e relacional
+$.

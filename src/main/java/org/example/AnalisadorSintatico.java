@@ -1,46 +1,51 @@
 package org.example;
 
+import org.example.AST.*; // CondicionalNode, IterativoNode, etc.
+
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * AnalisadorSintatico.java
- * Implementa a Análise Preditiva Recursiva e delega a Análise Semântica
- * para AnalisadorSemantico.java.
+ * Implementa a Análise Preditiva Recursiva e constrói a Árvore Sintática Abstrata (AST).
  */
 public class AnalisadorSintatico {
     private final List<Token> tokens;
-    // O Analisador Sintático agora usa o Analisador Semântico
     private final AnalisadorSemantico analisadorSemantico;
     private int indiceAtual = 0;
     private boolean sucesso = false;
+    private ProgramaNode astRaiz;
 
     public AnalisadorSintatico(List<Token> tokens) {
         this.tokens = tokens;
-        this.analisadorSemantico = new AnalisadorSemantico(); // Inicializa o Analisador Semântico
+        this.analisadorSemantico = new AnalisadorSemantico();
     }
 
     // --- Métodos de Controle ---
-
     public boolean analiseBemSucedida() {
         return sucesso;
     }
 
-    // Delega a impressão da Tabela de Símbolos para a classe semântica
+    public ProgramaNode getAstRaiz() {
+        return astRaiz;
+    }
+
     public void imprimirTabelaDeSimbolos() {
         analisadorSemantico.getTabelaSimbolos().imprimirTabela();
     }
 
-    /**
-     * Ponto de entrada do Analisador.
-     */
+    public AnalisadorSemantico getAnalisadorSemantico() {
+        return analisadorSemantico;
+    }
+
     public void analisar() {
-        System.out.println("\n--- Iniciando Análise Sintática e Semântica ---");
+        System.out.println("\n--- Iniciando Análise Sintática e Construção da AST ---");
         try {
-            inicio();
+            astRaiz = inicio();
 
             if (tokenAtual().getTipo() == TipoToken.EOF) {
-                System.out.println("Análise Sintática e Semântica concluída com sucesso!");
                 sucesso = true;
+                System.out.println("Resultado: Análise Sintática concluída. A estrutura do programa é válida.");
             } else {
                 throw new Exception("Erro Sintático: Tokens inesperados após o fim do programa.");
             }
@@ -48,12 +53,15 @@ public class AnalisadorSintatico {
             sucesso = false;
             System.err.println(e.getMessage());
             Token erroToken = tokenAtual();
-            System.err.println("Localização: Linha " + erroToken.getLinha() + ", Coluna " + erroToken.getColuna());
+            int linha = erroToken.getLinha() != -1 ? erroToken.getLinha() :
+                    (indiceAtual > 0 ? tokens.get(indiceAtual - 1).getLinha() : -1);
+            int coluna = erroToken.getColuna() != -1 ? erroToken.getColuna() :
+                    (indiceAtual > 0 ? tokens.get(indiceAtual - 1).getColuna() : -1);
+            System.err.println("Localização: Linha " + linha + ", Coluna " + coluna);
         }
     }
 
     // --- Métodos de Suporte ---
-
     private Token tokenAtual() {
         if (indiceAtual < tokens.size()) {
             return tokens.get(indiceAtual);
@@ -64,7 +72,6 @@ public class AnalisadorSintatico {
     private void consumir(TipoToken tipoEsperado) throws Exception {
         Token atual = tokenAtual();
         if (atual.getTipo() == tipoEsperado) {
-            System.out.println("Consumido: " + atual.getLexema());
             indiceAtual++;
         } else {
             throw new Exception("Erro Sintático (Linha " + atual.getLinha() + ", Coluna " + atual.getColuna() +
@@ -84,18 +91,25 @@ public class AnalisadorSintatico {
     // --- Regras de Produção ---
 
     // início ::= $ { tipo } { comando } $.
-    private void inicio() throws Exception {
+    private ProgramaNode inicio() throws Exception {
+        Token startToken = tokenAtual();
         consumir(TipoToken.INICIO_PROGRAMA);
 
+        // 1. Processa Tipos (Declarações)
         while (isTipoDeclaracao(tokenAtual().getTipo())) {
             tipo();
         }
 
+        // 2. Processa Comandos
+        List<ASTNode> listaComandos = new ArrayList<>();
         while (isComando(tokenAtual().getTipo())) {
-            comando();
+            listaComandos.add(comando());
         }
 
         consumir(TipoToken.FIM_PROGRAMA);
+
+        // 3. Retorna o nó raiz
+        return new ProgramaNode(listaComandos, startToken.getLinha(), startToken.getColuna());
     }
 
     private boolean isTipoDeclaracao(TipoToken tipo) {
@@ -107,208 +121,253 @@ public class AnalisadorSintatico {
         TipoToken tipoTokenDeclarado = tokenAtual().getTipo();
         TipoDado tipoDadoDeclarado = tipoTokenParaTipoDado(tipoTokenDeclarado);
 
-        // 1. Consome o tipo
         consumir(tipoTokenDeclarado);
-
-        // 2. Consome e insere o primeiro identificador
         Token tokenID = tokenAtual();
         consumir(TipoToken.IDENTIFICADOR);
-        // SEMÂNTICA: Inserir (delegado a TabelaSimbolos)
         analisadorSemantico.getTabelaSimbolos().inserir(
                 tokenID.getLexema(), tipoDadoDeclarado, tokenID.getLinha(), tokenID.getColuna()
         );
 
-        // 3. { , identificador } - Repetição
         while (tokenAtual().getTipo() == TipoToken.VIRGULA) {
             consumir(TipoToken.VIRGULA);
-
             tokenID = tokenAtual();
             consumir(TipoToken.IDENTIFICADOR);
-            // SEMÂNTICA: Inserir (delegado a TabelaSimbolos)
             analisadorSemantico.getTabelaSimbolos().inserir(
                     tokenID.getLexema(), tipoDadoDeclarado, tokenID.getLinha(), tokenID.getColuna()
             );
         }
-
-        // 4. Consome o delimitador final
         consumir(TipoToken.PONTO_VIRGULA);
     }
 
     private boolean isComando(TipoToken tipo) {
-        return tipo == TipoToken.SE ||
-                tipo == TipoToken.ENQUANTO ||
-                tipo == TipoToken.IDENTIFICADOR;
+        return tipo == TipoToken.SE || tipo == TipoToken.ENQUANTO || tipo == TipoToken.IDENTIFICADOR;
     }
 
-    private void comando() throws Exception {
+    // comando ::= condicional | iterativo | atribuição
+    private ASTNode comando() throws Exception {
         TipoToken tipo = tokenAtual().getTipo();
 
         if (tipo == TipoToken.SE) {
-            condicional();
+            return condicional();
         } else if (tipo == TipoToken.ENQUANTO) {
-            iterativo();
+            return iterativo();
         } else if (tipo == TipoToken.IDENTIFICADOR) {
-            atribuicao();
+            return atribuicao();
         } else {
-            throw new Exception("Erro Sintático: Esperado um comando (se, enquanto, identificador).");
+            throw new Exception("Erro Sintático: Esperado um comando (SE, ENQUANTO, ou IDENTIFICADOR).");
         }
     }
 
     // condicional ::= se condição entao comando [ senao comando ]
-    private void condicional() throws Exception {
+    private ASTNode condicional() throws Exception {
+        Token seToken = tokenAtual();
         consumir(TipoToken.SE);
-        condicao();
+        ASTNode condicaoNode = condicao();
         consumir(TipoToken.ENTAO);
-        comando();
+        ASTNode comandoEntao = comando();
 
+        ASTNode comandoSenao = null;
         if (tokenAtual().getTipo() == TipoToken.SENAO) {
             consumir(TipoToken.SENAO);
-            comando();
+            comandoSenao = comando();
         }
+
+        return new CondicionalNode(condicaoNode, comandoEntao, comandoSenao,
+                seToken.getLinha(), seToken.getColuna());
     }
 
     // iterativo ::= enquanto condição comando
-    private void iterativo() throws Exception {
+    private ASTNode iterativo() throws Exception {
+        Token enquantoToken = tokenAtual();
         consumir(TipoToken.ENQUANTO);
-        condicao();
-        comando();
+        ASTNode condicaoNode = condicao();
+        ASTNode comandoCorpo = comando();
+
+        return new IterativoNode(condicaoNode, comandoCorpo,
+                enquantoToken.getLinha(), enquantoToken.getColuna());
     }
 
     // atribuição ::= identificador = valor { operador valor } ;
-    private void atribuicao() throws Exception {
-        // 1. LHS (L-value)
+    private ASTNode atribuicao() throws Exception {
         Token tokenLHS = tokenAtual();
-        // SEMÂNTICA: Checa declaração e obtém o tipo LHS
-        TipoDado tipoLHS = analisadorSemantico.checarDeclaracao(
+        IdentificadorNode identificadorLHS = new IdentificadorNode(
                 tokenLHS.getLexema(), tokenLHS.getLinha(), tokenLHS.getColuna()
         );
         consumir(TipoToken.IDENTIFICADOR);
 
         consumir(TipoToken.ATRIBUICAO);
 
-        // 2. RHS (R-value) - Obtém o tipo do resultado inicial
-        TipoDado tipoRHS = valor();
+        ASTNode expressaoRHS = valor();
 
-        // { operador valor } - Agrega as operações à direita para determinar o tipo final
         while (isOperadorAritmetico(tokenAtual().getTipo())) {
-            operador();
-            TipoDado tipoOperando = valor();
+            Token operador = tokenAtual();
+            consumir(operador.getTipo());
+            ASTNode operando2 = valor();
 
-            // SEMÂNTICA: Delega a determinação do tipo final da subexpressão
-            tipoRHS = analisadorSemantico.determinarTipoExpressao(
-                    tipoRHS, tipoOperando, tokenAtual().getLinha(), tokenAtual().getColuna()
+            expressaoRHS = new ExpressaoBinariaNode(
+                    expressaoRHS, operador, operando2,
+                    operador.getLinha(), operador.getColuna()
             );
         }
-
-        // 3. SEMÂNTICA: Checagem de compatibilidade de atribuição final
-        analisadorSemantico.checarAtribuicao(
-                tipoLHS, tipoRHS, tokenLHS.getLinha(), tokenLHS.getColuna()
-        );
 
         consumir(TipoToken.PONTO_VIRGULA);
+
+        return new AtribuicaoNode(
+                identificadorLHS, expressaoRHS,
+                tokenLHS.getLinha(), tokenLHS.getColuna()
+        );
     }
 
-    // valor ::= expressão | identificador
-    private TipoDado valor() throws Exception { // Retorna TipoDado
-        if (tokenAtual().getTipo() == TipoToken.ABRE_PARENTESES || tokenAtual().getTipo() == TipoToken.NUMERICO) {
+    // valor ::= identificador | número | expressão entre parênteses
+    private ASTNode valor() throws Exception {
+        if (tokenAtual().getTipo() == TipoToken.NUMERICO
+                || tokenAtual().getTipo() == TipoToken.IDENTIFICADOR
+                || tokenAtual().getTipo() == TipoToken.ABRE_PARENTESES) {
             return expressao();
+        } else {
+            throw new Exception("Erro Sintático: Esperado expressão, identificador ou número.");
+        }
+    }
+
+    private boolean isOperadorAritmetico(TipoToken tipo) {
+        return tipo == TipoToken.SOMA
+                || tipo == TipoToken.MULTIPLICACAO
+                || tipo == TipoToken.DIVISAO
+                || tipo == TipoToken.RESTO;
+    }
+
+    // expressao ::= ( expressao ) | identificador | número | expressão binária aritmética
+    private ASTNode expressao() throws Exception {
+        if (tokenAtual().getTipo() == TipoToken.NUMERICO) {
+            Token numToken = tokenAtual();
+            consumir(TipoToken.NUMERICO);
+            return new LiteralNode(numToken);
         } else if (tokenAtual().getTipo() == TipoToken.IDENTIFICADOR) {
             Token idToken = tokenAtual();
-            // SEMÂNTICA: Checa declaração e obtém o tipo
-            TipoDado tipoID = analisadorSemantico.checarDeclaracao(
-                    idToken.getLexema(), idToken.getLinha(), idToken.getColuna()
-            );
             consumir(TipoToken.IDENTIFICADOR);
-            return tipoID;
-        } else {
-            throw new Exception("Erro Sintático: Esperado expressão ou identificador.");
-        }
-    }
-
-    // operador ::= + | * | / | RESTO
-    private boolean isOperadorAritmetico(TipoToken tipo) {
-        return tipo == TipoToken.SOMA ||
-                tipo == TipoToken.MULTIPLICACAO ||
-                tipo == TipoToken.DIVISAO ||
-                tipo == TipoToken.RESTO;
-    }
-
-    private void operador() throws Exception {
-        TipoToken tipo = tokenAtual().getTipo();
-        if (isOperadorAritmetico(tipo)) {
-            consumir(tipo);
-        } else {
-            throw new Exception("Erro Sintático: Esperado um operador aritmético (+, *, /, RESTO).");
-        }
-    }
-
-    // expressao ::= número | ( expressão operador expressão )
-    private TipoDado expressao() throws Exception { // Retorna TipoDado (Tipo resultante)
-        if (tokenAtual().getTipo() == TipoToken.NUMERICO) {
-            String lexema = tokenAtual().getLexema();
-            consumir(TipoToken.NUMERICO);
-            // Inferência de Tipo (local, semântica trivial)
-            return lexema.contains(".") ? TipoDado.REAL : TipoDado.INTEIRO;
-
+            return new IdentificadorNode(idToken.getLexema(), idToken.getLinha(), idToken.getColuna());
         } else if (tokenAtual().getTipo() == TipoToken.ABRE_PARENTESES) {
+
+            Token inicioToken = tokenAtual();
             consumir(TipoToken.ABRE_PARENTESES);
 
-            TipoDado tipoE1 = expressao();
-            operador();
-            TipoDado tipoE2 = expressao();
-            consumir(TipoToken.FECHA_PARENTESES);
+            ASTNode expressaoInterna = expressao();
 
-            // SEMÂNTICA: Delega a determinação do tipo resultante
-            return analisadorSemantico.determinarTipoExpressao(
-                    tipoE1, tipoE2, tokenAtual().getLinha(), tokenAtual().getColuna()
-            );
-
-        } else {
-            throw new Exception("Erro Sintático: Esperado número ou '(' para iniciar expressão.");
-        }
-    }
-
-    // --- Métodos de Condição (Usam apenas checagem de declaração) ---
-
-    private void condicao() throws Exception {
-        consumir(TipoToken.ABRE_PARENTESES);
-
-        // SEMÂNTICA: Checa declaração
-        analisadorSemantico.checarDeclaracao(tokenAtual().getLexema(), tokenAtual().getLinha(), tokenAtual().getColuna());
-        consumir(TipoToken.IDENTIFICADOR);
-
-        if (tokenAtual().getTipo() == TipoToken.NAO) {
-            consumir(TipoToken.NAO);
-            consumir(TipoToken.ABRE_PARENTESES);
-            condicao();
-            consumir(TipoToken.FECHA_PARENTESES);
-            logica_opcional();
-        } else {
-            logico();
-            termo();
-            consumir(TipoToken.FECHA_PARENTESES);
-            logica_opcional();
-        }
-    }
-
-    private void logica_opcional() throws Exception {
-        while (tokenAtual().getTipo() == TipoToken.E || tokenAtual().getTipo() == TipoToken.OU) {
-            if (tokenAtual().getTipo() == TipoToken.E) {
-                consumir(TipoToken.E);
-            } else {
-                consumir(TipoToken.OU);
+            if (isOperadorAritmetico(tokenAtual().getTipo())) {
+                Token operador = tokenAtual();
+                consumir(operador.getTipo());
+                ASTNode operando2 = expressao();
+                expressaoInterna = new ExpressaoBinariaNode(
+                        expressaoInterna, operador, operando2,
+                        inicioToken.getLinha(), inicioToken.getColuna()
+                );
             }
 
-            consumir(TipoToken.ABRE_PARENTESES);
-
-            // SEMÂNTICA: Checa declaração
-            analisadorSemantico.checarDeclaracao(tokenAtual().getLexema(), tokenAtual().getLinha(), tokenAtual().getColuna());
-            consumir(TipoToken.IDENTIFICADOR);
-
-            logico();
-            termo();
             consumir(TipoToken.FECHA_PARENTESES);
+            return expressaoInterna;
+
+        } else {
+            Token t = tokenAtual();
+            throw new Exception("Erro Sintático (Linha " + t.getLinha() + ", Coluna " + t.getColuna() +
+                    "): Esperado número, identificador ou '(' para iniciar expressão.");
         }
+    }
+
+    // ================================
+    //  CONDIÇÕES (NOT, E, OR)
+    // ================================
+
+    /**
+     * condição ::= condicaoSimples { (E | OU) condicaoSimples }
+     *
+     * condicaoSimples ::= '(' condicaoInterna ')'
+     *
+     * Exemplos aceitos:
+     *   se (x <= 5.0) entao ...
+     *   se (x <= 5.0) OR (z > 10) entao ...
+     *   se (NOT b < a) entao ...
+     *   se (NOT (b < a)) entao ...
+     */
+    private ASTNode condicao() throws Exception {
+        // Primeiro bloco entre parênteses
+        ASTNode condicaoAtual = condicaoSimples();
+
+        // Zero ou mais "E"/"OR" seguidos de outro bloco entre parênteses
+        while (tokenAtual().getTipo() == TipoToken.E ||
+                tokenAtual().getTipo() == TipoToken.OU) {
+
+            Token opComposto = tokenAtual(); // E ou OR
+            consumir(opComposto.getTipo());
+
+            ASTNode proximaCondicao = condicaoSimples();
+
+            condicaoAtual = new ExpressaoCompostaNode(
+                    condicaoAtual, opComposto, proximaCondicao,
+                    opComposto.getLinha(), opComposto.getColuna()
+            );
+        }
+
+        return condicaoAtual;
+    }
+
+    // condicaoSimples ::= '(' condicaoInterna ')'
+    private ASTNode condicaoSimples() throws Exception {
+        consumir(TipoToken.ABRE_PARENTESES);
+        ASTNode inner = condicaoInterna();
+        consumir(TipoToken.FECHA_PARENTESES);
+        return inner;
+    }
+
+    /**
+     * condicaoInterna ::= [NAO] comparacao
+     *                   | [NAO] '(' condicaoInterna ')'
+     *
+     * Isso permite:
+     *   (b < a)
+     *   (NOT b < a)
+     *   (NOT (b < a))
+     */
+    private ASTNode condicaoInterna() throws Exception {
+        boolean temNot = false;
+        Token notToken = null;
+
+        if (tokenAtual().getTipo() == TipoToken.NAO) {
+            notToken = tokenAtual();
+            consumir(TipoToken.NAO);
+            temNot = true;
+        }
+
+        ASTNode base;
+
+        if (tokenAtual().getTipo() == TipoToken.ABRE_PARENTESES) {
+            // NOT ( ... ) ou apenas ( ... )
+            consumir(TipoToken.ABRE_PARENTESES);
+            base = condicaoInterna();
+            consumir(TipoToken.FECHA_PARENTESES);
+        } else {
+            // NOT comparacao  ou  comparacao
+            base = comparacao();
+        }
+
+        if (temNot) {
+            return new NotNode(base,
+                    notToken.getLinha(), notToken.getColuna());
+        } else {
+            return base;
+        }
+    }
+
+    // comparacao ::= termo logico termo
+    private ASTNode comparacao() throws Exception {
+        ASTNode t1 = termo();
+        Token operadorRelacional = tokenAtual();
+        logico();
+        ASTNode t2 = termo();
+
+        return new CondicaoBinariaNode(
+                t1, operadorRelacional, t2,
+                operadorRelacional.getLinha(), operadorRelacional.getColuna()
+        );
     }
 
     // logico ::= > | < | <= | >= | == | !=
@@ -317,23 +376,28 @@ public class AnalisadorSintatico {
         if (tipo == TipoToken.MAIOR_QUE || tipo == TipoToken.MENOR_QUE ||
                 tipo == TipoToken.MAIOR_IGUAL || tipo == TipoToken.MENOR_IGUAL ||
                 tipo == TipoToken.IGUAL || tipo == TipoToken.DIFERENTE) {
-
             consumir(tipo);
         } else {
-            throw new Exception("Erro Sintático: Esperado operador lógico/relacional.");
+            Token t = tokenAtual();
+            throw new Exception("Erro Sintático (Linha " + t.getLinha() + ", Coluna " + t.getColuna() +
+                    "): Esperado um operador lógico (>, <, <=, >=, ==, !=) mas encontrado " + t.getLexema());
         }
     }
 
-    // termo ::= identificador | número
-    private void termo() throws Exception {
+    // termo ::= identificador | numero
+    private ASTNode termo() throws Exception {
         if (tokenAtual().getTipo() == TipoToken.IDENTIFICADOR) {
-            // SEMÂNTICA: Checa declaração
-            analisadorSemantico.checarDeclaracao(tokenAtual().getLexema(), tokenAtual().getLinha(), tokenAtual().getColuna());
+            Token t = tokenAtual();
             consumir(TipoToken.IDENTIFICADOR);
+            return new IdentificadorNode(t.getLexema(), t.getLinha(), t.getColuna());
         } else if (tokenAtual().getTipo() == TipoToken.NUMERICO) {
+            Token t = tokenAtual();
             consumir(TipoToken.NUMERICO);
+            return new LiteralNode(t);
         } else {
-            throw new Exception("Erro Sintático: Esperado identificador ou número como termo da condição.");
+            Token t = tokenAtual();
+            throw new Exception("Erro Sintático (Linha " + t.getLinha() + ", Coluna " + t.getColuna() +
+                    "): Esperado identificador ou número como termo da condição.");
         }
     }
 }

@@ -1,0 +1,7 @@
+$
+inteiro a, b, c;
+a = 10 + 0;
+b = 5 * 2;
+c = a + b;
+se (c > 20) entao a = a + 1;
+$.

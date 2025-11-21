@@ -1,0 +1,16 @@
+$
+inteiro contador, limite;
+real resultado, taxa;
+contador = 5;
+limite = 10;
+resultado = 0;
+enquanto (contador <= limite)
+resultado = resultado + (contador * 2) / taxa;
+contador = contador RESTO 3;
+se (contador == 0) entao
+taxa = taxa + 1;
+se (resultado > 100) entao
+resultado = 0;
+senao
+resultado = resultado + 1;
+$.

@@ -1,0 +1,13 @@
+$
+real x, y;
+inteiro z;
+
+x = 10.0 / 2.0;
+y = 20 / 4;
+z = 10 + 0;
+
+se (x <= 5.0) OR (z > 10) entao
+    y = x + 1.0;
+senao
+    y = x + 0.0;
+$.

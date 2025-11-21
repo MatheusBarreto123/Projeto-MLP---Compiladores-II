@@ -1,0 +1,10 @@
+$
+inteiro contador, resultado;
+
+contador = 10 + 0;
+resultado = 0 + 0;
+
+enquanto (contador != 0)
+    contador = contador RESTO 2; // Teste RESTO e atribuição na mesma linha
+    
+$.

@@ -1,0 +1,5 @@
+$
+inteiro a;
+enquanto (a < 10)
+a = a + 1;
+$.

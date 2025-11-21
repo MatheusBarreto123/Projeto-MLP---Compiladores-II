@@ -1,0 +1,5 @@
+$
+inteiro a, b;
+se (a > 10) entao
+b = b + 1;
+$.

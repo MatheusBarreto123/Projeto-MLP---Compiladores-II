@@ -27,6 +27,7 @@ public class AnalisadorSemantico {
         return entrada.getTipo();
     }
 
+
     /**
      * Semântica (Atribuição): Verifica compatibilidade de tipos (Regra SEM_04).
      * Permite alargamento (INTEIRO -> REAL), mas não o inverso.
@@ -76,4 +77,16 @@ public class AnalisadorSemantico {
         // Caso contrário, o resultado é INTEIRO
         return TipoDado.INTEIRO;
     }
+
+    /**
+     * Registra o tipo de uma variável temporária gerada pelo C3E.
+     * Isso permite que temporários sejam tratados como variáveis válidas
+     * e tenham seus tipos checados em expressões subsequentes.
+     * * @param temporario O nome do temporário (ex: "T1").
+     * @param tipo O TipoDado do temporário (INTEIRO ou REAL).
+     */
+    public void registrarTipoTemporario(String temporario, TipoDado tipo) {
+        this.tabelaSimbolos.inserirSimboloGerado(temporario, tipo);
+    }
+
 }
